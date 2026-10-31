@@ -1,0 +1,2 @@
+# Place fold*_best.pth model weights in this directory.
+# Weights are ignored by git because each file exceeds GitHub's 100MB upload limit.

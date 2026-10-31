@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTorch weights (>100MB exceeds GitHub push limits)
+weights/*.pth
+!weights/.gitkeep
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Streamlit local settings
+.streamlit/secrets.toml
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
