@@ -7,6 +7,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import torch
+import cv2
 from PIL import Image
 
 from core.config import (
@@ -83,14 +84,21 @@ def main():
 
         mode = st.radio(
             "Inference Mode",
-            options=["Fast", "Balanced", "Accurate"],
+            options=["Fast", "Balanced", "Accurate", "Multi-Scale"],
             index=1,
-            help="Fast: single view (1x). Balanced: TTA flip ensemble (3x). Accurate: multi-model TTA ensemble (3x * N models).",
+            help=(
+                "Reference notebook sweep result (fold0, AP@0.6):\n"
+                "• Fast (single, thr=0.4): 0.454\n"
+                "• **Balanced** (flips, thr=0.4): **0.467 ← BEST**\n"
+                "• Accurate (flips × all models): ensemble\n"
+                "• Multi-Scale (7 views × all models): reference 'multi' set"
+            ),
         )
         st.caption(
-            "• **Fast**: 1 forward pass/tile\n"
-            "• **Balanced**: 3 TTA passes/tile\n"
-            "• **Accurate**: 3 passes × all models"
+            "• **Fast**: 1 view/tile · fastest\n"
+            "• **Balanced**: 3 TTA views/tile ← validated best single-model\n"
+            "• **Accurate**: 3 views × all models\n"
+            "• **Multi-Scale**: 7 views × all models (slowest, most thorough)"
         )
 
         if models and len(models) > 1 and mode in ["Fast", "Balanced"]:
@@ -99,9 +107,30 @@ def main():
                 "Active Checkpoint",
                 options=model_names,
                 index=0,
-                help="Checkpoint used for Fast and Balanced modes.",
+                help="Checkpoint used for Fast and Balanced modes. fold0_best.pth is recommended (highest held-out AP).",
             )
             models = sorted(models, key=lambda m: 0 if m[0] == selected_model_name else 1)
+
+        st.divider()
+
+        scale_option = st.selectbox(
+            "Tissue Magnification",
+            options=[
+                "1.0x (Native 20x scale)",
+                "0.5x (40x High-power zoom)",
+                "0.4x (60x High-power zoom)",
+                "0.75x (Intermediate zoom)",
+            ],
+            index=0,
+            help="If your biopsy/photo was taken at 40x or 60x (where cell nuclei look large), scale it down to match the 20x scale the model was trained on.",
+        )
+        scale_factor = 1.0
+        if "0.5x" in scale_option:
+            scale_factor = 0.5
+        elif "0.4x" in scale_option:
+            scale_factor = 0.4
+        elif "0.75x" in scale_option:
+            scale_factor = 0.75
 
         st.divider()
 
@@ -111,7 +140,7 @@ def main():
             max_value=0.70,
             value=float(DEFAULT_MASK_THR),
             step=0.05,
-            help="Probability cutoff for individual pixel masks. Changing this requires re-running segmentation.",
+            help="Probability cutoff for individual pixel masks. Raising to 0.50-0.55 makes vessel boundaries tighter.",
         )
 
         score_thr = st.slider(
@@ -120,7 +149,7 @@ def main():
             max_value=0.95,
             value=float(DEFAULT_SCORE_THR),
             step=0.05,
-            help="Instant post-filter. Vessels below this score are hidden. Does not re-run the model.",
+            help="Instant post-filter. Reference notebook best-F1 threshold = 0.69. Default 0.50 balances precision/recall. Does not re-run the model.",
         )
 
         opacity = st.slider(
@@ -164,7 +193,7 @@ def main():
             """
             - **Task:** Instance segmentation of blood vessels in kidney H&E whole-slide / tile images.
             - **Architecture:** Torchvision `maskrcnn_resnet50_fpn_v2` with custom box/mask heads for binary vessel detection.
-            - **Expected Quality:** On held-out slides, expected AP@0.6 is ~0.39 (precision ~0.53, recall ~0.44 at score 0.3).
+            - **Expected Quality:** Reference notebook validated AP@0.6 = **0.467** (Balanced/flips mode, mask_thr=0.4). Best-F1 score threshold = 0.69, giving precision ~0.47, recall ~0.54.
             - **Clinical Disclaimer:** This tool is strictly for **research and demonstration purposes**. Do not use predictions as ground truth or for clinical diagnostics.
             """
         )
@@ -188,26 +217,31 @@ def main():
             help="Supports standard formats as well as 8-bit/16-bit TIFFs.",
         )
 
-    sample_paths = sorted(Path("samples").glob("*.*"))
+    sample_paths = sorted(
+        [p for p in Path("samples").glob("*.*") if p.suffix.lower() in [".tif", ".tiff", ".png", ".jpg", ".jpeg"]]
+    )
     use_sample = False
+    chosen_sample = None
     with col_sample:
-        st.write("")
-        st.write("")
+        st.caption("Or load benchmark tile:")
         if sample_paths:
-            if st.button("📁 Use Sample Image", use_container_width=True):
+            sample_names = [p.name for p in sample_paths]
+            chosen_name = st.selectbox("Sample Tiles", options=sample_names, label_visibility="collapsed")
+            if st.button("📁 Load Selected Tile", use_container_width=True):
                 use_sample = True
+                chosen_sample = next(p for p in sample_paths if p.name == chosen_name)
 
     # Determine input bytes
     image_bytes = None
     file_name = "tissue_image"
 
-    if use_sample and sample_paths:
-        sample_file = sample_paths[0]
-        file_name = sample_file.name
-        with open(sample_file, "rb") as f:
+    if use_sample and chosen_sample:
+        file_name = chosen_sample.name
+        with open(chosen_sample, "rb") as f:
             image_bytes = f.read()
         st.session_state["uploaded_bytes"] = image_bytes
         st.session_state["file_name"] = file_name
+        st.session_state.pop("current_result", None)
     elif uploaded_file is not None:
         file_name = uploaded_file.name
         image_bytes = uploaded_file.read()
@@ -240,13 +274,23 @@ def main():
         st.error(f"Could not load image file: {e}")
         return
 
+    orig_h, orig_w = raw_img.shape[:2]
+    if scale_factor != 1.0:
+        new_w = max(256, int(round(orig_w * scale_factor)))
+        new_h = max(256, int(round(orig_h * scale_factor)))
+        raw_img = cv2.resize(raw_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        st.caption(
+            f"Input dimensions: {orig_w} × {orig_h} px → Rescaled to **{new_w} × {new_h} px** ({scale_factor}x) to align with 20x training scale | RGB uint8"
+        )
+    else:
+        st.caption(f"Input dimensions: **{orig_w} × {orig_h} px** | Format: RGB uint8")
+
     h, w = raw_img.shape[:2]
-    st.caption(f"Input dimensions: **{w} × {h} px** | Format: RGB uint8")
 
     # ------------------ Execution Trigger & State ------------------
     file_hash = hashlib.sha1(image_bytes).hexdigest()
     model_tag = models[0][0] if (mode in ["Fast", "Balanced"] and models) else "ensemble"
-    cache_key = (file_hash, mode, mask_thr, model_tag)
+    cache_key = (file_hash, mode, mask_thr, model_tag, scale_factor)
 
     run_btn = st.button("🚀 Run Segmentation", type="primary", use_container_width=False)
 

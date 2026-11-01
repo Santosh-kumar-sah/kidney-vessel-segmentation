@@ -14,6 +14,8 @@ from core.config import (
     MIN_SCORE,
     MAX_DET,
     DEFAULT_MASK_THR,
+    MS_SCALE_LO,
+    MS_SCALE_HI,
 )
 from core.tiling import (
     make_tiles,
@@ -63,7 +65,10 @@ def run_inference(
     if len(models) == 0:
         raise ValueError("No models provided to run_inference.")
 
-    # Configure mode
+    # Configure mode — matches reference notebook view_sets() exactly:
+    # single = [(id, 1280)]
+    # flips  = [(id,1280), (h,1280), (v,1280)]          ← BEST_CFG from sweep
+    # multi  = flips + [(id,1024),(h,1024),(id,1600),(h,1600)]  (7 views)
     mode_clean = mode.strip().capitalize()
     if mode_clean == "Fast":
         models_used = models[:1]
@@ -74,8 +79,16 @@ def run_inference(
     elif mode_clean == "Accurate":
         models_used = models
         views = [("id", MODEL_SIZE), ("h", MODEL_SIZE), ("v", MODEL_SIZE)]
+    elif mode_clean == "Multi-scale":
+        # Reference notebook "multi" view set — 7 views, all models
+        models_used = models
+        views = [
+            ("id", MODEL_SIZE), ("h", MODEL_SIZE), ("v", MODEL_SIZE),  # flips at base size
+            ("id", MS_SCALE_LO), ("h", MS_SCALE_LO),                  # smaller input (1024)
+            ("id", MS_SCALE_HI), ("h", MS_SCALE_HI),                  # larger input  (1600)
+        ]
     else:
-        raise ValueError(f"Unknown inference mode '{mode}'. Choose Fast, Balanced, or Accurate.")
+        raise ValueError(f"Unknown inference mode '{mode}'. Choose Fast, Balanced, Accurate, or Multi-Scale.")
 
     # Ensure device is set
     if device is None:
