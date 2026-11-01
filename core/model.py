@@ -58,14 +58,18 @@ def load_models(
             cpu_count = os.cpu_count() or 1
             torch.set_num_threads(cpu_count)
 
+    def _natural_key(p: Path):
+        import re
+        return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", p.name)]
+
     path = Path(weights_dir)
     if path.is_file():
         weight_files = [path]
     elif path.is_dir():
-        weight_files = sorted(path.glob("fold*_best.pth"))
+        weight_files = sorted(path.glob("fold*_best.pth"), key=_natural_key)
     else:
         # Check if it was passed as a glob pattern
-        globbed = sorted(Path(p) for p in glob.glob(str(weights_dir)))
+        globbed = sorted((Path(p) for p in glob.glob(str(weights_dir))), key=_natural_key)
         weight_files = globbed
 
     if not weight_files:

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import unittest
 import numpy as np
 import pandas as pd
@@ -14,11 +15,11 @@ class TestKidneyVesselSegmentation(unittest.TestCase):
     def setUp(self):
         self.device = get_device()
         os.makedirs("weights", exist_ok=True)
-        # Ensure at least one test weight file exists
-        test_weight_path = "weights/fold0_best.pth"
-        if not os.path.exists(test_weight_path):
+        # Only create a dummy weight file if no weights exist at all
+        existing_weights = list(Path("weights").glob("fold*_best.pth"))
+        if not existing_weights:
             m = build_model()
-            torch.save(m.state_dict(), test_weight_path)
+            torch.save(m.state_dict(), "weights/fold_test_best.pth")
 
     def test_1_weights_load_strict(self):
         """(1) all weights load with strict=True without error."""

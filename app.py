@@ -93,6 +93,16 @@ def main():
             "• **Accurate**: 3 passes × all models"
         )
 
+        if models and len(models) > 1 and mode in ["Fast", "Balanced"]:
+            model_names = [name for name, _ in models]
+            selected_model_name = st.selectbox(
+                "Active Checkpoint",
+                options=model_names,
+                index=0,
+                help="Checkpoint used for Fast and Balanced modes.",
+            )
+            models = sorted(models, key=lambda m: 0 if m[0] == selected_model_name else 1)
+
         st.divider()
 
         mask_thr = st.slider(
@@ -235,7 +245,8 @@ def main():
 
     # ------------------ Execution Trigger & State ------------------
     file_hash = hashlib.sha1(image_bytes).hexdigest()
-    cache_key = (file_hash, mode, mask_thr)
+    model_tag = models[0][0] if (mode in ["Fast", "Balanced"] and models) else "ensemble"
+    cache_key = (file_hash, mode, mask_thr, model_tag)
 
     run_btn = st.button("🚀 Run Segmentation", type="primary", use_container_width=False)
 
