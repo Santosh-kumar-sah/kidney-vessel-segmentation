@@ -24,7 +24,7 @@ An interactive deep learning web application for **instance segmentation of micr
 
 ---
 
-## 🚀 Quickstart Guide
+##  Quickstart Guide
 
 ### 1. Clone the Repository
 ```bash
