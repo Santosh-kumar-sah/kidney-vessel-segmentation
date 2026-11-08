@@ -281,6 +281,4 @@ python -m unittest tests/smoke_test.py
 
 ---
 
-## 👥 Authors & Academic Context
 
-Developed as part of the **Department of Computer Science & Engineering (Artificial Intelligence)** at **Krishna Institute of Engineering & Technology (KIET)**, Ghaziabad, Uttar Pradesh, India, in collaboration with HuBMAP research benchmarks.
